@@ -109,8 +109,9 @@ days = np.unique(all_days)
 
 # print header
 header()
-print('Query EFD')
 from joblib import Parallel, delayed
+
+print('Query EFD')
 Parallel(n_jobs=nCores)(delayed(queryEFDThermalInfo)(day) for day in days)
 
 print('Query srcMatchFull')

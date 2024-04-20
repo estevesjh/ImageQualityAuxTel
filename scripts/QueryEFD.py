@@ -6,8 +6,10 @@ from lsst.summit.utils.efdUtils import getEfdData, makeEfdClient
 thermal = {'lsst.sal.ATDome.position': ['azimuthPosition', 'mainDoorOpeningPercentage'],
            'lsst.sal.ATMCS.trajectory': ['elevation0', 'azimuth0'],
            'lsst.sal.ESS.airFlow': ['speed'],
-           'lsst.sal.ESS.airTurbulence':['sonicTemperature', 'sonicTemperatureStdDev', 'speed0', 'speed1', 'speed2'],
-           'lsst.sal.ESS.temperature': ['temperatureItem0', 'temperatureItem1', 'temperatureItem2','temperatureItem3', 'temperatureItem4']
+           'lsst.sal.ESS.airTurbulence':['sonicTemperature', 'sonicTemperatureStdDev', 
+                                         'speed0', 'speed1', 'speed2'],
+           'lsst.sal.ESS.temperature': ['temperatureItem0', 'temperatureItem1', 'temperatureItem2',
+                                        'temperatureItem3', 'temperatureItem4']
             }
 
 def queryEFDThermalInfo(day, domeFrac=95):
@@ -15,7 +17,8 @@ def queryEFDThermalInfo(day, domeFrac=95):
     efd = get_efd_day(day)
 
     # start of operation time
-    efd['night_t0']  = get_night_start_time(efd, fracTh=domeFrac)
+    t0 = get_night_start_time(efd, fracTh=domeFrac)
+    efd['night_t0']  = t0
 
     # bin the night time in 4 periods of 2.5 hours
     efd['night_period']  = getPeriodsNight(efd)
@@ -25,16 +28,17 @@ def queryEFDThermalInfo(day, domeFrac=95):
         efd['deltaTempM1M2'] = efd.temperatureItem0 - efd.temperatureItem2
 
         # get Max \Delta Temp. of M1 M2 in a window of 6 hours prior to operations (night_t0)
-        deltaTempMax, deltaTimeMax = get_max_value_window(efd, 'deltaTempM1M2')
-        efd['deltaTempM1M2_night_t0_value'] = interpolate_time_series(efd, 'deltaTempM1M2', efd['night_t0'].iloc[0])
-        efd['deltaTempM1M2_day_value'] = deltaTempMax
-        efd['deltaTempM1M2_day_time'] = deltaTimeMax
+        if not pd.isnull(t0):
+            deltaTempMax, deltaTimeMax = get_max_value_window(efd, 'deltaTempM1M2')
+            efd['deltaTempM1M2_night_t0_value'] = interpolate_time_series(efd, 'deltaTempM1M2', efd['night_t0'].iloc[0])
+            efd['deltaTempM1M2_day_value'] = deltaTempMax
+            efd['deltaTempM1M2_day_time'] = deltaTimeMax
 
-        # M2 Temperature
-        M2TempMax, M2deltaTimeMax = get_max_value_window(efd, 'temperatureItem2')
-        efd['M2_night_t0_value'] = interpolate_time_series(efd, 'temperatureItem2', efd['night_t0'].iloc[0])
-        efd['M2_day_value'] = deltaTempMax
-        efd['M2_day_time'] = deltaTimeMax
+            # M2 Temperature
+            M2TempMax, M2deltaTimeMax = get_max_value_window(efd, 'temperatureItem2')
+            efd['M2_night_t0_value'] = interpolate_time_series(efd, 'temperatureItem2', efd['night_t0'].iloc[0])
+            efd['M2_day_value'] = M2TempMax
+            efd['M2_day_time'] = M2deltaTimeMax
 
     # save the efd
     print(f'file saved: ./data/efd/efd_thermal_data_{day}.csv')
@@ -92,7 +96,7 @@ def getPeriodsNight(df, deltaTime=2.5):
 
     return df['night_period'].to_numpy()
 
-def get_max_value_window(df, col, deltaTime=6.):
+def get_max_value_window(df, col, deltaTime=6., is_norm=True):
     first_open_time = df.night_t0.iloc[0]
     
     # Define the time window
@@ -102,10 +106,18 @@ def get_max_value_window(df, col, deltaTime=6.):
     # Filter the dataframe for the time window
     time_window_df = df.loc[start_time_window:end_time_window]
     
-    # Find the maximum value of deltaTemp_M1M2
+    xvar = time_window_df[col]
+
+    # get the largest temp gradient with norm
+    if is_norm:
+        xvar = np.abs(xvar)
+
     if not time_window_df.empty:
-        max_delta_temp_six_hours_before = time_window_df[col].max()
-        max_delta_temp_time = time_window_df[col].idxmax()
+        # Find the maximum value of deltaTemp_M1M2
+        max_delta_temp_time = xvar.idxmax()
+        # get sign right
+        max_delta_temp_six_hours_before = interpolate_time_series(time_window_df, col, max_delta_temp_time) 
+        # hours before the begnining of the night
         time_difference_hours = (first_open_time - max_delta_temp_time).total_seconds() / 3600
 
     else:
